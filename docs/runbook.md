@@ -57,3 +57,35 @@ All tests must pass. / Всички тестове трябва да минат.
 ```bash
    git revert <sha>
 ```
+
+## Run with Docker
+
+Build the image:
+
+```bash
+docker build -t notes-api:0.3.0 .
+```
+
+Run the container:
+
+```bash
+docker run -d --name notes-api -p 8000:8000 notes-api:0.3.0
+```
+
+Check the health endpoint:
+
+```bash
+curl http://localhost:8000/health
+```
+
+View the container logs:
+
+```bash
+docker logs notes-api
+```
+
+Stop and remove the container:
+
+```bash
+docker rm -f notes-api
+```
