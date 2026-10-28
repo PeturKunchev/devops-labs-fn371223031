@@ -89,3 +89,59 @@ Stop and remove the container:
 ```bash
 docker rm -f notes-api
 ```
+
+## Run with Docker Compose
+
+### Configure environment variables
+
+Copy `.env.example` to `.env` and set the PostgreSQL credentials. The `.env` file is excluded from Git and must not be committed.
+
+### Start the application
+
+Build the application image and start the application and database:
+
+```bash
+docker compose up -d --build
+```
+
+### Check running services
+
+```bash
+docker compose ps
+```
+
+The database should report `healthy` once its healthcheck succeeds.
+
+### View application logs
+
+```bash
+docker compose logs -f app
+```
+
+Press `Ctrl+C` to stop following the logs.
+
+### Stop services
+
+```bash
+docker compose down
+```
+
+This stops and removes the containers and network while preserving the named database volume.
+
+To also remove the named volume and its persisted database data:
+
+```bash
+docker compose down -v
+```
+
+Use this command only when you intend to delete the stored database data.
+
+### Optional database administration
+
+Start Adminer using the `tools` profile:
+
+```bash
+docker compose --profile tools up -d
+```
+
+Open port `8081` in GitHub Codespaces. Select PostgreSQL as the system, use `db` as the server, and enter the credentials configured in `.env`.
