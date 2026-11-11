@@ -4,6 +4,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
 
 jobs:
@@ -43,18 +44,53 @@ jobs:
     runs-on: ubuntu-24.04
     needs: test
 
+    permissions:
+      contents: read
+      packages: write
+
     steps:
       - uses: actions/checkout@v7
 
+      - name: Set image name
+        id: image
+        run: |
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
       - name: Build Docker image
-        run: docker build -t notes-api:${{ github.sha }} .
+        run: docker build -t "$IMAGE:${{ github.sha }}" .
 
       - name: Smoke test
         run: |
-          docker run -d --name app -p 8000:8000 notes-api:${{ github.sha }}
+          docker run -d --name app -p 8000:8000 "$IMAGE:${{ github.sha }}"
           for _ in $(seq 1 20); do
             curl -fs localhost:8000/health && exit 0
             sleep 1
           done
           docker logs app
           exit 1
+
+      - name: Scan for vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.image }}:${{ github.sha }}
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Push to GitHub Container Registry
+        if: github.event_name == 'push'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker push "$IMAGE:${{ github.sha }}"
+
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            docker tag "$IMAGE:${{ github.sha }}" "$IMAGE:latest"
+            docker push "$IMAGE:latest"
+          fi
+
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            docker tag "$IMAGE:${{ github.sha }}" "$IMAGE:${{ github.ref_name }}"
+            docker push "$IMAGE:${{ github.ref_name }}"
+          fi
