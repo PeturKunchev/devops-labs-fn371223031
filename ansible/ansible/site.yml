@@ -1,0 +1,141 @@
+---
+- name: Prepare every server
+  hosts: all
+  become: true
+  tags: [base]
+  tasks:
+    - name: Install base packages
+      ansible.builtin.apt:
+        name: [curl, ca-certificates, acl]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+- name: Configure the database
+  hosts: db
+  become: true
+  tags: [base]
+  vars:
+    db_name: notes
+    db_user: notes
+    db_password: notes-lab-password
+  tasks:
+    - name: Install PostgreSQL and its Python driver
+      ansible.builtin.apt:
+        name: [postgresql, python3-psycopg2]
+        state: present
+        update_cache: true
+
+    - name: Listen on all network interfaces
+      ansible.builtin.lineinfile:
+        path: /etc/postgresql/17/main/postgresql.conf
+        regexp: '^#?listen_addresses\s*='
+        line: "listen_addresses = '*'"
+      notify: Restart PostgreSQL
+
+    - name: Allow password connections from the lab network
+      ansible.builtin.lineinfile:
+        path: /etc/postgresql/17/main/pg_hba.conf
+        line: 'host all all 0.0.0.0/0 scram-sha-256'
+      notify: Restart PostgreSQL
+
+    - name: Start PostgreSQL before creating the database
+      ansible.builtin.service:
+        name: postgresql
+        state: started
+      
+    - name: Create the Notes database user
+      community.postgresql.postgresql_user:
+        name: "{{ db_user }}"
+        password: "{{ db_password }}"
+      become_user: postgres
+
+    - name: Create the Notes database
+      community.postgresql.postgresql_db:
+        name: "{{ db_name }}"
+        owner: "{{ db_user }}"
+      become_user: postgres
+
+  handlers:
+    - name: Restart PostgreSQL
+      ansible.builtin.service:
+        name: postgresql
+        state: restarted
+
+- name: Configure the web servers
+  hosts: web
+  become: true
+  tags: [base]
+  vars:
+    database_url: postgresql://notes:notes-lab-password@db:5432/notes
+    notes_repo: "https://github.com/PeturKunchev/devops-labs-fn371223031.git"
+  tasks:
+    - name: Install the app runtime and Git
+      ansible.builtin.apt:
+        name: [python3-venv, python3-packaging, git]
+        state: present
+        update_cache: true
+
+    - name: Check out the Notes app
+      ansible.builtin.git:
+        repo: "{{ notes_repo }}"
+        dest: /opt/notes
+      notify: Restart notes
+
+    - name: Install app requirements
+      ansible.builtin.pip:
+        requirements: /opt/notes/requirements.txt
+        virtualenv: /opt/notes/.venv
+        virtualenv_command: python3 -m venv
+      notify: Restart notes
+
+    - name: Install the Notes systemd service
+      ansible.builtin.template:
+        src: templates/notes.service.j2
+        dest: /etc/systemd/system/notes.service
+        mode: '0644'
+      notify: Restart notes
+
+    - name: Enable and start Notes
+      ansible.builtin.systemd_service:
+        name: notes
+        enabled: true
+        state: started
+        daemon_reload: true
+
+  handlers:
+    - name: Restart notes
+      ansible.builtin.systemd_service:
+        name: notes
+        state: restarted
+        daemon_reload: true
+
+- name: Configure the load balancer
+  hosts: lb
+  become: true
+  tags: [base]
+  tasks:
+    - name: Install nginx
+      ansible.builtin.apt:
+        name: nginx
+        state: present
+        update_cache: true
+
+    - name: Configure nginx upstream and proxy
+      ansible.builtin.template:
+        src: templates/nginx-notes.conf.j2
+        dest: /etc/nginx/sites-available/default
+        mode: '0644'
+      notify: Reload nginx
+
+    - name: Enable and start nginx
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: true
+
+  handlers:
+    - name: Reload nginx
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded
